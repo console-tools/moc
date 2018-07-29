@@ -1261,7 +1261,7 @@ static AVPacket *get_packet (struct ffmpeg_data *data)
 	return NULL;
 }
 
-#ifndef HAVE_AVCODEC_DECODE_AUDIO4
+#if !defined(HAVE_AVCODEC_DECODE_AUDIO4) && !defined(HAVE_AVCODEC_RECEIVE_FRAME)
 /* Decode samples from packet data using pre-avcodec_decode_audio4(). */
 static int decode_packet (struct ffmpeg_data *data, AVPacket *pkt,
                           char *buf, int buf_len)
@@ -1324,8 +1324,78 @@ static int decode_packet (struct ffmpeg_data *data, AVPacket *pkt,
 }
 #endif
 
-#ifdef HAVE_AVCODEC_DECODE_AUDIO4
+#if defined(HAVE_AVCODEC_DECODE_AUDIO4) && !defined(HAVE_AVCODEC_RECEIVE_FRAME)
 /* Decode samples from packet data using avcodec_decode_audio4(). */
+# define decode_audio avcodec_decode_audio4
+#endif
+
+#ifdef HAVE_AVCODEC_RECEIVE_FRAME
+/* Decode audio using FFmpeg's send/receive encoding and decoding API. */
+static int decode_audio (AVCodecContext *ctx, AVFrame *frame,
+                         int *got_frame_ptr, const AVPacket *pkt)
+{
+	int rc, result = 0;
+	char buf[128];
+
+	*got_frame_ptr = 0;
+
+	rc = avcodec_send_packet (ctx, pkt);
+	switch (rc) {
+	case 0:
+		break;
+	case AVERROR(EAGAIN):
+		debug ("avcodec_send_packet(): AVERROR(EAGAIN)");
+		break;
+	case AVERROR_EOF:
+		if (pkt->data)
+			debug ("avcodec_send_packet(): AVERROR_EOF");
+		break;
+	case AVERROR(EINVAL):
+		logit ("avcodec_send_packet(): AVERROR(EINVAL)");
+		result = rc;
+		break;
+	case AVERROR(ENOMEM):
+		logit ("avcodec_send_packet(): AVERROR(ENOMEM)");
+		result = rc;
+		break;
+	default:
+		av_strerror (rc, buf, sizeof (buf));
+		logit ("avcodec_send_packet(): %s", buf);
+		result = rc;
+	}
+
+	if (result == 0) {
+		result = pkt->size;
+
+		rc = avcodec_receive_frame (ctx, frame);
+		switch (rc) {
+		case 0:
+			*got_frame_ptr = 1;
+			break;
+		case AVERROR(EAGAIN):
+			debug ("avcodec_receive_frame(): AVERROR(EAGAIN)");
+			break;
+		case AVERROR_EOF:
+			debug ("avcodec_receive_frame(): AVERROR_EOF");
+			avcodec_flush_buffers (ctx);
+			break;
+		case AVERROR(EINVAL):
+			logit ("avcodec_receive_frame(): AVERROR(EINVAL)");
+			result = rc;
+			break;
+		default:
+			av_strerror (rc, buf, sizeof (buf));
+			logit ("avcodec_receive_frame(): %s", buf);
+			result = rc;
+		}
+	}
+
+	return result;
+}
+#endif
+
+#if defined(HAVE_AVCODEC_DECODE_AUDIO4) || defined(HAVE_AVCODEC_RECEIVE_FRAME)
+/* Decode samples from packet data. */
 static int decode_packet (struct ffmpeg_data *data, AVPacket *pkt,
                           char *buf, int buf_len)
 {
@@ -1342,7 +1412,7 @@ static int decode_packet (struct ffmpeg_data *data, AVPacket *pkt,
 	do {
 		int len, got_frame, is_planar, packed_size, copied;
 
-		len = avcodec_decode_audio4 (data->enc, frame, &got_frame, pkt);
+		len = decode_audio (data->enc, frame, &got_frame, pkt);
 
 		if (len < 0) {
 			/* skip frame */

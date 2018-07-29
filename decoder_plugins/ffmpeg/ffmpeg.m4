@@ -206,6 +206,8 @@ then
 		AC_SEARCH_LIBS(av_lockmgr_register, avcodec,
 			[AC_DEFINE([HAVE_LOCKMGR_REGISTER], 1,
 				[Define to 1 if you have the `av_lockmgr_register' function.])])
+		AC_CHECK_MEMBERS([struct AVStream.codecpar], [], [],
+		                 [#include <libavformat/avformat.h>])
 		CPPFLAGS="$save_CPPFLAGS"
 		CFLAGS="$save_CFLAGS"
 		LIBS="$save_LIBS"

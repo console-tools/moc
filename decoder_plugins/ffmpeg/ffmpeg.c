@@ -523,9 +523,13 @@ static void ffmpeg_init ()
 #else
 	av_log_set_level (AV_LOG_ERROR);
 #endif
+
 	av_log_set_callback (ffmpeg_log_cb);
+
+#if HAVE_LIBAV || LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58,10,100)
 	avcodec_register_all ();
 	av_register_all ();
+#endif
 
 	supported_extns = lists_strs_new (16);
 	load_audio_extns (supported_extns);

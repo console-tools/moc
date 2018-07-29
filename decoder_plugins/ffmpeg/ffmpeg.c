@@ -784,7 +784,7 @@ static bool is_seek_broken (struct ffmpeg_data *data)
 
 #ifdef HAVE_AVIOCONTEXT_SEEKABLE
 	/* How much do we trust this? */
-	if (!data->ic->pb->seekable) {
+	if (!(data->ic->pb->seekable & AVIO_SEEKABLE_NORMAL)) {
 		debug ("Seek broken by AVIOContext.seekable");
 		return true;
 	}

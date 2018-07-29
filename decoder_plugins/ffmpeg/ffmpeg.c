@@ -965,7 +965,20 @@ static void *ffmpeg_open (const char *file)
 	}
 
 	data->stream = data->ic->streams[audio_ix];
-	data->enc = data->stream->codec;
+
+	data->enc = avcodec_alloc_context3 (NULL);
+	if (!data->enc) {
+		decoder_error (&data->error, ERROR_FATAL, 0,
+		               "Failed to allocate codec context");
+		goto end;
+	}
+
+	err = avcodec_copy_context (data->enc, data->stream->codec);
+	if (err < 0) {
+		decoder_error (&data->error, ERROR_FATAL, 0,
+		               "Failed to copy codec context");
+		goto end;
+	}
 
 	data->codec = avcodec_find_decoder (data->enc->codec_id);
 	if (!data->codec) {
@@ -1019,7 +1032,6 @@ static void *ffmpeg_open (const char *file)
 		decoder_error (&data->error, ERROR_FATAL, 0,
 		               "Unsupported sample size!");
 #endif
-		avcodec_close (data->enc);
 		goto end;
 	}
 
@@ -1034,7 +1046,6 @@ static void *ffmpeg_open (const char *file)
 		ffmpeg_log_repeats (NULL);
 		decoder_error (&data->error, ERROR_FATAL, 0,
 		                   "Broken WAV file; use W64!");
-		avcodec_close (data->enc);
 		goto end;
 	}
 
@@ -1056,6 +1067,15 @@ static void *ffmpeg_open (const char *file)
 	return data;
 
 end:
+	if (data->enc) {
+#ifdef HAVE_AVCODEC_FREE_CONTEXT
+		avcodec_free_context (&data->enc);
+#else
+		avcodec_close (data->enc);
+		av_freep (&data->enc);
+#endif
+	}
+
 #ifdef HAVE_AVFORMAT_CLOSE_INPUT
 	avformat_close_input (&data->ic);
 #else
@@ -1403,7 +1423,7 @@ static bool seek_in_stream (struct ffmpeg_data *data, int sec)
 		return false;
 	}
 
-	avcodec_flush_buffers (data->stream->codec);
+	avcodec_flush_buffers (data->enc);
 
 	return true;
 }
@@ -1526,7 +1546,13 @@ static void ffmpeg_close (void *prv_data)
 	struct ffmpeg_data *data = (struct ffmpeg_data *)prv_data;
 
 	if (data->okay) {
+#ifdef HAVE_AVCODEC_FREE_CONTEXT
+		avcodec_free_context (&data->enc);
+#else
 		avcodec_close (data->enc);
+		av_freep (&data->enc);
+#endif
+
 #ifdef HAVE_AVFORMAT_CLOSE_INPUT
 		avformat_close_input (&data->ic);
 #else
